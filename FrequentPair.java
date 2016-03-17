@@ -1,5 +1,3 @@
-package homework2;
-
 import java.io.BufferedWriter;
 import java.io.FileNotFoundException;
 import java.io.FileWriter;
@@ -15,7 +13,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 
-public class QuestionA {
+public class FrequentPair {
 
 	static class Pair {
 
