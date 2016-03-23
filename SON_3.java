@@ -29,7 +29,37 @@ import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
 
 
-public class SON {
+public class SON_3 {
+	
+	static class Triplet {
+		private int item1;
+		private int item2;
+		private int item3;
+		
+		public Triplet(int _item1, int _item2, int _item3) {
+			this.item1 = _item1;
+			this.item2 = _item2;
+			this.item3 = _item3;
+		}
+		
+		public int getItem1() {
+			return this.item1;
+		}
+		
+		public int getItem2() {
+			return this.item2;
+		}
+		
+		public int getItem3() {
+			return this.item3;
+		}
+		
+		@Override
+		public String toString() {
+			return item1+" "+item2+" "+item3;
+		}
+		
+	}
     
 	static class Pair {
 
@@ -76,16 +106,14 @@ public class SON {
 		public MutableInt(int _val) {
 			value = _val;
 		}
+	
 	}
-
-
 
     // phase1's Mapper's job is:
     // 1 read a chunk of input file
-    // 2 generate all the pairs
-    // 3 count all the pairs
-    // 4 select those words with frequency higher than required
-    // 5 output those words with frequency higher than required to reducer
+    // 2 count all words
+	// 3 count all pairs which contain two frequent words
+	// 4 count all triplets which each pair from it is frequent
     public static class Phase1Mapper
     extends Mapper<LongWritable, Text, Text, NullWritable>{
 
@@ -102,12 +130,14 @@ public class SON {
         public static ArrayList<Integer> differentPairs;
 
         public static HashMap<Integer,Pair> pairMap;
+        
+        public static HashMap<Triplet,MutableInt> tripletMap;
 
         public static ArrayList<String[]> baskets;
 
         public static int allBaskets = 0;
 
-        public static double frequencyBaskets = 0.005 ;
+        public static double frequencyRequired = 0.005;
 
         public static int wordIndex = 1;
 
@@ -131,19 +161,27 @@ public class SON {
                 InterruptedException {
         	
             aPrior();
-            
-            for(int i=0;i<differentPairs.size();i++) {
+           
+	
+
+ 
+            for ( Map.Entry<Triplet,MutableInt> entry : tripletMap.entrySet() ) {
             	
-                Pair newWordIndex = pairMap.get( differentPairs.get(i) );
-                int first = newWordIndex.getItem1();
-                int second = newWordIndex.getItem2();
+            	Triplet key = entry.getKey();
+             	MutableInt val = entry.getValue();
+             	
+                int first = key.getItem1();
+                int second = key.getItem2();
+                int third = key.getItem3();
                 
-                String[] stringsOutput = new String[2];
+                
+                String[] stringsOutput = new String[3];
                 stringsOutput[0] = intToWord.get(first);
                 stringsOutput[1] = intToWord.get(second);
+                stringsOutput[2] = intToWord.get(third);
                 Arrays.sort(stringsOutput);
                 
-                context.write( new Text( stringsOutput[0] +" "+ stringsOutput[1] ), NullWritable.get() );
+                context.write( new Text( stringsOutput[0] +" "+ stringsOutput[1] +" "+ stringsOutput[2] ), NullWritable.get() );
             }
         }
 
@@ -158,6 +196,7 @@ public class SON {
         public void aPrior() {
             phase1();
             phase2();
+            phase3();
         }
 
         public void phase1() {
@@ -201,7 +240,7 @@ public class SON {
                 MutableInt value = frequencyWords.get(i);
                 int frequency = value.get();
                 
-                if ( frequency >= frequencyBaskets * allBaskets ) {
+                if ( frequency >= frequencyRequired * allBaskets ) {
                     differentWords.put(i, indexOfDifferentWords);
                     indexOfDifferentWords++;
                 }
@@ -229,7 +268,7 @@ public class SON {
 
             for( int i=1;i<frequencyPairs.length;i++ ) {
                 int times = frequencyPairs[i];
-                if ( times >= frequencyBaskets * allBaskets ) {
+                if ( times >= frequencyRequired * allBaskets ) {
                     differentPairs.add(i);
                 }
             }
@@ -272,6 +311,107 @@ public class SON {
                 }
             }
         }
+        
+        
+        public void phase3() {
+       
+		pairMap = null;
+
+		frequencyWords = null;
+ 
+		tripletMap = new HashMap<Triplet,MutableInt>();
+	
+        	for(int i=0;i<baskets.size();i++) {
+        		String[] stringArray = baskets.get(i);
+        		findFrequentTriplets(stringArray);
+        	}
+        	
+        }
+        
+        public void findFrequentTriplets(String[] stringArray) {
+        	
+        	int ki;
+        	int kj;
+        	int kk;
+        	int[] intArray = new int[3];
+        	
+        	for( int i=0 ; i<stringArray.length ; i++ ) {
+                for( int j=i+1 ; j<stringArray.length ; j++ ) {
+                	
+                	int item1Index = wordToInt.get(stringArray[i]);
+                    int item2Index = wordToInt.get(stringArray[j]);
+                    
+                    if ( differentWords.containsKey(item1Index) && differentWords.containsKey(item2Index) ) {
+                    	
+                        ki = differentWords.get(item1Index);
+                        kj = differentWords.get(item2Index);
+                        
+                        if ( ! checkWhetherFrequentPair(ki,kj)  ) {
+                        	continue;
+                        }
+                        
+                    }
+                    else {
+                    	continue;
+                    }
+                	
+                	for( int k=j+1 ; k<stringArray.length;k++) {
+                		
+                		int item3Index = wordToInt.get(stringArray[k]);
+                		
+	                    if ( differentWords.containsKey(item3Index) ) {
+	                    	
+	                    	kk = differentWords.get(item3Index);
+	                    	
+	                    	if ( ! checkWhetherFrequentPair(ki,kk) ) {
+	                    		continue;
+	                    	}
+	                    	
+	                    	if ( ! checkWhetherFrequentPair(kj,kk) ) {
+	                    		continue;
+	                    	}
+	                    	
+	                    	intArray[0]=item1Index;
+	                    	intArray[1]=item2Index;
+	                    	intArray[2]=item3Index;
+	                    	
+	                    	Arrays.sort(intArray);
+	                    	
+	                    	Triplet triplet = new Triplet(  intArray[0],intArray[1],intArray[2]  );
+	                    	
+	                    	MutableInt count = tripletMap.get( triplet );
+	                
+	                    	if ( count == null ) {
+	                    		tripletMap.put(triplet, new MutableInt(1));
+	                    	}
+	                    	else {
+	                    		count.increment();
+	                    	}
+	                    	
+	                    }
+	                    else {
+	                        continue;
+	                    }
+                	}
+                }
+            }
+        }
+        
+        public boolean checkWhetherFrequentPair(int first, int second) {
+        	if ( first < second ){
+                if (  frequencyPairs[ (first - 1)*(sizeOfDifferentWords) - (first - 1)*first/2 + second - first ] < frequencyRequired * allBaskets  ) {
+                	return false;
+                }
+            }
+            else if ( first > second ) {
+			    if (  frequencyPairs[ (second - 1)*(sizeOfDifferentWords) - (second - 1)*second/2 + first - second ] < frequencyRequired * allBaskets  ) {
+			    	return false;
+			    }
+            }
+        	return true;
+        }
+        
+        
     }
 
     public static class Phase1Reducer
@@ -288,7 +428,7 @@ public class SON {
     public static class Phase2Mapper
     extends Mapper<LongWritable, Text, Text, IntWritable>{
         
-        public static HashMap<String,MutableInt> frequencyPair;
+        public static HashMap<String,MutableInt> frequencyTriplet;
         
         public static ArrayList<String[]> baskets;
 
@@ -303,7 +443,7 @@ public class SON {
         	
         	supplementFile = context.getConfiguration().get("supplementFile");
             baskets = new ArrayList<String[]>();
-            frequencyPair = new HashMap<String,MutableInt>();
+            frequencyTriplet = new HashMap<String,MutableInt>();
             Path pt=new Path("hdfs://HadoopMaster:9000"+supplementFile+"/part-r-00000");
             FileSystem fs = FileSystem.get(context.getConfiguration());
             BufferedReader br=new BufferedReader(new InputStreamReader(fs.open(pt)));
@@ -311,11 +451,11 @@ public class SON {
             try {
                 String line;
                 line=br.readLine();
-                while (line != null) {
-		            String[] pair = line.trim().split(" ");
-		            Arrays.sort(pair);
+                while (line != null) {	
+		            String[] triplet = line.trim().split(" ");
+		            Arrays.sort(triplet);
 		            
-	                frequencyPair.put( pair[0]+" "+pair[1] , new MutableInt(0));
+		            frequencyTriplet.put( triplet[0]+" "+triplet[1]+" "+triplet[2] , new MutableInt(0));
 	                line = br.readLine();
                 }
             } finally {
@@ -328,9 +468,11 @@ public class SON {
         protected void cleanup(Context context)
                 throws IOException,
                 InterruptedException {
-        	
-		context.write( new Text(" ") , new IntWritable(allBaskets)   );
-            for( Map.Entry<String,MutableInt> entry : frequencyPair.entrySet() ) {
+        
+		context.write( new Text(" ") , new IntWritable(allBaskets) );
+
+	
+            for( Map.Entry<String,MutableInt> entry : frequencyTriplet.entrySet() ) {
                 context.write(new Text(entry.getKey()), new IntWritable(entry.getValue().get()));
             }
             
@@ -340,27 +482,32 @@ public class SON {
         @Override
         public void map(LongWritable key, Text value, Context context
                 ) throws IOException, InterruptedException {
-        	allBaskets ++ ;	
+        	
             String line = value.toString();
-            String[] pairs = line.trim().split(" ");
+            String[] triplets = line.trim().split(" ");
             
-            for(int i=0;i<pairs.length;i++) {
-            	for(int j=i+1;j<pairs.length;j++) {
-            		
-            		String[] stringCount = new String[2];
-            		
-            		stringCount[0] = pairs[i];
-            		stringCount[1] = pairs[j];
-            		
-            		Arrays.sort(stringCount);
-            		
-            		MutableInt count = frequencyPair.get( stringCount[0] +" "+ stringCount[1] );
-                    if ( count == null ) {
+	    allBaskets ++;
 
-                    }
-                    else {
-                        count.increment();
-                    }
+            for(int i=0;i<triplets.length;i++) {
+            	for(int j=i+1;j<triplets.length;j++) {
+            		for(int k=j+1;k<triplets.length;k++) {
+            		
+	            		String[] stringCount = new String[3];
+	            		
+	            		stringCount[0] = triplets[i];
+	            		stringCount[1] = triplets[j];
+	            		stringCount[2] = triplets[k];
+	            		
+	            		Arrays.sort(stringCount);
+	            		
+	            		MutableInt count = frequencyTriplet.get( stringCount[0] +" "+ stringCount[1] +" "+ stringCount[2] );
+	                    if ( count == null ) {
+	
+	                    }
+	                    else {
+	                        count.increment();
+	                    }
+            		}
             	}
             }
         }
@@ -374,6 +521,7 @@ public class SON {
     	HashMap<String,Integer> sortMap;
 
 	public static int allBaskets = 0;
+
 		@Override
 		protected void setup(Context context)
 	              throws IOException,
@@ -387,13 +535,12 @@ public class SON {
                 Context context
                 ) throws IOException, InterruptedException {
             int all = 0;
-
             for ( IntWritable val : values) {
                 all += val.get();
             }
 
-	    if ( key.toString().equals(" ")  ) {
-                allBaskets = all;
+	    if ( key.toString().equals(" ") ) {
+		allBaskets = all;
 	    }
 	    else {
             	sortMap.put( key.toString() , all );
@@ -415,12 +562,12 @@ public class SON {
 			    });
 			    
 			    int listSize = list.size();
-			   
-			    int outputNumber = Math.min(30,listSize);
- 
-			    for(int i = listSize - outputNumber ; i<listSize ;i++ ) {
+			    
+			    int outputNumber = Math.min(20, listSize);
+			    
+			    for(int i = listSize-outputNumber ; i<listSize ;i++ ) {
 					Map.Entry<String,Integer> entry = list.get(i);
-					context.write( new Text(entry.getKey()) , new DoubleWritable( ((double)entry.getValue())/allBaskets ) );
+					context.write( new Text(entry.getKey()) , new DoubleWritable(  (double)entry.getValue()/allBaskets  ) );
 					
 			    }
 			}
@@ -440,7 +587,7 @@ public class SON {
         jobConf.setNumReduceTasks(1);
 
         Job job = Job.getInstance(jobConf, "phase1");
-        job.setJarByClass(SON.class);
+        job.setJarByClass(SON_3.class);
 
         job.setMapperClass(Phase1Mapper.class);
         job.setReducerClass(Phase1Reducer.class);
@@ -478,7 +625,7 @@ public class SON {
 
 
         Job job2 = Job.getInstance(jobConf2, "phase2");
-        job2.setJarByClass(SON.class);
+        job2.setJarByClass(SON_3.class);
 
         job2.setMapperClass(Phase2Mapper.class);
         job2.setReducerClass(Phase2Reducer.class);
